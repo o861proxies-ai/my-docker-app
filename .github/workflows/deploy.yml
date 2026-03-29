@@ -1,0 +1,39 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:   # cho phép trigger thủ công từ GitHub UI
+
+jobs:
+  deploy:
+    name: Deploy to self-hosted server
+    runs-on: self-hosted   # chạy trên máy chủ của bạn, không phải VM GitHub
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Kiểm tra .env đã tồn tại chưa (file này không commit lên git)
+      - name: Check .env exists
+        run: |
+          if [ ! -f .env ]; then
+            echo "ERROR: .env file not found. Copy .env.example and fill in values."
+            exit 1
+          fi
+
+      - name: Pull latest images
+        run: docker compose pull
+
+      - name: Build & start services
+        run: docker compose up -d --build --remove-orphans
+
+      - name: Remove unused images
+        run: docker image prune -f
+
+      - name: Health check
+        run: |
+          echo "Waiting for app to start..."
+          sleep 5
+          docker compose ps

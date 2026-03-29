@@ -1,0 +1,45 @@
+# ================================================================
+#  Cloudflare Tunnel — config.yml.example
+# ================================================================
+# File này dùng khi bạn muốn cấu hình ingress rules tại local
+# thay vì dùng Cloudflare dashboard.
+#
+# Cách dùng:
+#   1. Copy file này thành config.yml (KHÔNG commit config.yml lên git)
+#   2. Điền tunnel ID (lấy từ: cloudflared tunnel list)
+#   3. Mount vào container trong docker-compose:
+#
+#      cloudflared:
+#        image: cloudflare/cloudflared:latest
+#        command: tunnel --config /etc/cloudflared/config.yml run
+#        volumes:
+#          - ./cloudflared/config.yml:/etc/cloudflared/config.yml:ro
+#          - ./cloudflared/creds.json:/etc/cloudflared/creds.json:ro
+#
+# ⚠️  Nếu dùng TUNNEL_TOKEN trong docker-compose (cách mặc định),
+#     KHÔNG cần file này — routes cấu hình trên CF dashboard.
+# ================================================================
+
+# ID của tunnel (lấy từ: cloudflared tunnel list)
+tunnel: <TUNNEL_ID>
+credentials-file: /etc/cloudflared/creds.json
+
+ingress:
+  # Node.js app
+  - hostname: app.yourdomain.com
+    service: http://caddy:80
+
+  # Portainer
+  - hostname: portainer.yourdomain.com
+    service: http://caddy:80
+
+  # Dozzle — xem log
+  - hostname: logs.yourdomain.com
+    service: http://caddy:80
+
+  # Filebrowser — duyệt file
+  - hostname: files.yourdomain.com
+    service: http://caddy:80
+
+  # Catch-all: trả 404 cho hostname không khớp
+  - service: http_status:404

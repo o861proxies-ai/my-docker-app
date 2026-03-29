@@ -1,0 +1,132 @@
+services:
+
+  # ================================================================
+  #  CADDY — Reverse proxy + SSL tự động
+  #  caddy-docker-proxy: tự đọc Docker labels để tạo route
+  # ================================================================
+  caddy:
+    image: lucaslorentz/caddy-docker-proxy:ci-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      - CADDY_INGRESS_NETWORKS=app_net
+    labels:
+      caddy.email: "${CADDY_EMAIL}"
+    networks: [app_net]
+    restart: unless-stopped
+
+  # ================================================================
+  #  CLOUDFLARE TUNNEL — Expose ra Internet không cần mở port
+  #  Toàn bộ traffic đổ về Caddy qua internal network
+  # ================================================================
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel run
+    environment:
+      TUNNEL_TOKEN: "${CF_TUNNEL_TOKEN}"
+    networks: [app_net]
+    restart: unless-stopped
+    depends_on:
+      - caddy
+
+  # ================================================================
+  #  TAILSCALE — VPN nội bộ cho team (tuỳ chọn)
+  #  Team kết nối Tailscale VPN → truy cập Caddy qua IP tailscale
+  # ================================================================
+  tailscale:
+    image: tailscale/tailscale:latest
+    hostname: docker-host
+    environment:
+      TS_AUTHKEY: "${TS_AUTHKEY}"
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "false"
+    volumes:
+      - tailscale_data:/var/lib/tailscale
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    network_mode: host
+    restart: unless-stopped
+
+  # ================================================================
+  #  NODE.JS APP — Dịch vụ chính Hello World
+  # ================================================================
+  app:
+    build: ./services/app
+    environment:
+      NODE_ENV: "${NODE_ENV:-production}"
+      PORT: "${APP_PORT:-3000}"
+      LOG_DIR: "${LOG_DIR:-/app/logs}"
+    volumes:
+      - ./logs/app:/app/logs        # log file ghi ra host
+    labels:
+      caddy: "app.${DOMAIN}"
+      caddy.reverse_proxy: "{{upstreams ${APP_PORT:-3000}}}"
+      caddy.basicauth: "/*"
+      caddy.basicauth.${CADDY_AUTH_USER}: "${CADDY_AUTH_HASH}"
+    networks: [app_net]
+    restart: unless-stopped
+
+  # ================================================================
+  #  PORTAINER — Quản lý Docker toàn diện qua UI
+  #  Có login riêng — không cần Caddy basicauth
+  # ================================================================
+  portainer:
+    image: portainer/portainer-ce:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - portainer_data:/data
+    labels:
+      caddy: "${PORTAINER_SUBDOMAIN:-portainer}.${DOMAIN}"
+      caddy.reverse_proxy: "{{upstreams 9000}}"
+    networks: [app_net]
+    restart: unless-stopped
+
+  # ================================================================
+  #  DOZZLE — Xem log realtime của tất cả container
+  # ================================================================
+  dozzle:
+    image: amir20/dozzle:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    labels:
+      caddy: "${DOZZLE_SUBDOMAIN:-logs}.${DOMAIN}"
+      caddy.reverse_proxy: "{{upstreams 8080}}"
+      caddy.basicauth: "/*"
+      caddy.basicauth.${CADDY_AUTH_USER}: "${CADDY_AUTH_HASH}"
+    networks: [app_net]
+    restart: unless-stopped
+
+  # ================================================================
+  #  FILEBROWSER — Duyệt và tải file log qua web
+  # ================================================================
+  filebrowser:
+    image: filebrowser/filebrowser:latest
+    command: --noauth --port 80 --root /srv --database /database/filebrowser.db
+    volumes:
+      - ./logs:/srv                         # serve toàn bộ thư mục logs
+      - filebrowser_data:/database
+    labels:
+      caddy: "${FILEBROWSER_SUBDOMAIN:-files}.${DOMAIN}"
+      caddy.reverse_proxy: "{{upstreams 80}}"
+      caddy.basicauth: "/*"
+      caddy.basicauth.${CADDY_AUTH_USER}: "${CADDY_AUTH_HASH}"
+    networks: [app_net]
+    restart: unless-stopped
+
+networks:
+  app_net:
+    name: app_net
+
+volumes:
+  caddy_data:
+  caddy_config:
+  portainer_data:
+  tailscale_data:
+  filebrowser_data:
