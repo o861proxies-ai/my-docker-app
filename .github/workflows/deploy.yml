@@ -16,7 +16,7 @@ jobs:
       - name: Npm install
         run: |
           npm install -g @tltdh61/dotenvrtdb
-          dotenvrtdb -e .env --pull -eUrl="$RTDB_URL"
+          dotenvrtdb -e .env --pull -eUrl="$RTDB_URL" --writefilebase64=./cloudflared-credentials.json --var=CLOUDFLARED_TUNNEL_CREDENTIALS_BASE64
 
       - name: Check .env exists
         run: |
