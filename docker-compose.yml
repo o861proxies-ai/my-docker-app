@@ -60,6 +60,7 @@ services:
   # ================================================================
   app:
     build: ./services/app
+    user: "0:0"
     environment:
       NODE_ENV: "${NODE_ENV:-production}"
       PORT: "${APP_PORT:-3000}"
