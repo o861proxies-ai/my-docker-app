@@ -124,7 +124,7 @@ services:
       - "StrictHostKeyChecking=no" # ← bỏ qua known_hosts
       - "-o"
       - "ConnectTimeout=10"
-      - "${SSH_USER:-root}@host.docker.internal"
+      - "${SSH_USER:-runner}@host.docker.internal"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
