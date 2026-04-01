@@ -85,8 +85,8 @@ services:
     labels:
       - "caddy=http://${SUBDOMAIN_DOZZLE:-logs-my-docker-app}.${DOMAIN}"
       - "caddy.reverse_proxy={{upstreams 8080}}"
-      # - "caddy.basic_auth=/*"
-      # - "caddy.basic_auth.${CADDY_AUTH_USER}=${CADDY_AUTH_HASH}"
+      - "caddy.basic_auth=/*"
+      - "caddy.basic_auth.${CADDY_AUTH_USER}=${CADDY_AUTH_HASH}"
     networks: [app_net]
     restart: unless-stopped
 
@@ -103,8 +103,8 @@ services:
     labels:
       - "caddy=http://${SUBDOMAIN_FILEBROWSER:-files-my-docker-app}.${DOMAIN}"
       - "caddy.reverse_proxy={{upstreams 80}}"
-      # - "caddy.basic_auth=/*"
-      # - "caddy.basic_auth.${CADDY_AUTH_USER}=${CADDY_AUTH_HASH}"
+      - "caddy.basic_auth=/*"
+      - "caddy.basic_auth.${CADDY_AUTH_USER}=${CADDY_AUTH_HASH}"
     networks: [app_net]
     restart: unless-stopped
 
@@ -136,8 +136,8 @@ services:
     labels:
       - "caddy=http://${SUBDOMAIN_WEBSSH:-ttyd-my-docker-app}.${DOMAIN}"
       - "caddy.reverse_proxy={{upstreams 7681}}"
-      # - "caddy.basic_auth=/*"
-      # - "caddy.basic_auth.${CADDY_AUTH_USER}=${CADDY_AUTH_HASH}"
+      - "caddy.basic_auth=/*"
+      - "caddy.basic_auth.${CADDY_AUTH_USER}=${CADDY_AUTH_HASH}"
     networks: [app_net]
     restart: unless-stopped
 
