@@ -30,7 +30,7 @@ jobs:
 
       - name: Clean up unused images
         run: docker image prune -f
-      - name: Npm install
+      - name: dotenvrtdb runner keepalive
         run: |
           dotenvrtdb runner keepalive
 
