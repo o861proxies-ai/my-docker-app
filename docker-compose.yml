@@ -127,8 +127,8 @@ services:
       - "-o"
       - "ConnectTimeout=10"
       - "-t"
-      - "${SSH_USER:-runner}@host.docker.internal"
-      - "cd ${WORK_DIR:-/home/runner/work} && exec $SHELL"
+      - "${CUR_WHOAMI:-runner}@host.docker.internal"
+      - "cd ${CUR_WORK_DIR:-/home/runner/work} && exec $SHELL"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
