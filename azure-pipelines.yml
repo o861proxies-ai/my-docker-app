@@ -1,32 +1,51 @@
-trigger:
-  branches:
-    include:
-      - main
+# Bám sát luồng .github/workflows/deploy.yml:
+# - Chỉ chạy deploy theo trigger thủ công (manual), không auto CI/PR.
+# - Giữ các bước deploy/runtime artifacts tương đương.
+
+trigger: none
+pr: none
 
 pool:
-  name: Default        # tên agent pool self-hosted của bạn
-  # Nếu đặt tên pool khác, đổi lại ở đây
+  name: Default
+
+variables:
+  # Khác biệt nền tảng: Azure dùng secret variable trong Pipeline/Variable Group.
+  RTDB_URL: $(RTDB_URL)
 
 steps:
   - checkout: self
     displayName: Checkout code
 
-  - script: |
-      mkdir -p $(Build.ArtifactStagingDirectory)/docker-runtime
-      mkdir -p $(Build.ArtifactStagingDirectory)/docker-runtime/compose-files
-      cp docker-compose.yml $(Build.ArtifactStagingDirectory)/docker-runtime/compose-files/docker-compose.yml
-      if [ -f .env ]; then cp .env $(Build.ArtifactStagingDirectory)/docker-runtime/compose-files/.env; fi
-    displayName: Prepare artifact folders
+  - script: npm install -g @tltdh61/dotenvrtdb
+    displayName: Install dotenvrtdb CLI
 
   - script: |
-      if [ ! -f .env ]; then
-        echo "ERROR: .env file not found. Copy .env.example and fill in values."
-        exit 1
-      fi
-    displayName: Check .env exists
+      mkdir -p services/webssh/.ssh
+      dotenvrtdb -e .env --pull -eUrl="$(RTDB_URL)" \
+        --writefilebase64=./cloudflared-credentials.json \
+        --var=CLOUDFLARED_TUNNEL_CREDENTIALS_BASE64
+      echo "CUR_WORK_DIR=$(pwd)" >> .env
+      echo "CUR_WHOAMI=$(whoami)" >> .env
+    displayName: Pull .env & credentials from RTDB
 
-  - script: docker compose pull
-    displayName: Pull latest images
+  - script: |
+      mkdir -p services/webssh/.ssh
+
+      # Giữ nguyên tên id_rsa để tương thích với workflow GitHub hiện tại.
+      ssh-keygen -t ed25519 -f ./services/webssh/.ssh/id_rsa -N "" -q
+      echo "✅ SSH keypair generated"
+
+      mkdir -p ~/.ssh && chmod 700 ~/.ssh
+      cat ./services/webssh/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
+      chmod 600 ~/.ssh/authorized_keys
+      echo "✅ Public key added to authorized_keys"
+
+      sudo systemctl restart ssh
+      sleep 1
+      sudo systemctl is-active ssh \
+        && echo "✅ sshd is running" \
+        || { echo "❌ sshd failed"; exit 1; }
+    displayName: Generate SSH keypair & setup sshd
 
   - script: docker compose up -d --build --remove-orphans
     displayName: Build & start services
@@ -34,16 +53,12 @@ steps:
   - script: docker image prune -f
     displayName: Clean up unused images
 
-  - script: |
-      echo "Waiting for services..."
-      sleep 5
-      docker compose ps
-    displayName: Health check
+  - script: dotenvrtdb runner keepalive
+    displayName: dotenvrtdb runner keepalive
 
   - script: |
       set +e
       OUT_DIR="$(Build.ArtifactStagingDirectory)/docker-runtime"
-      mkdir -p "$OUT_DIR"
       mkdir -p "$OUT_DIR/logs"
 
       docker compose ps -a > "$OUT_DIR/compose-ps.txt" 2>&1
