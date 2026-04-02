@@ -70,27 +70,103 @@ jobs:
       #  Windows runner mặc định ở Windows container mode → pull Linux
       #  image sẽ fail với "no matching manifest for windows/amd64"
       # ================================================================
-      - name: Switch Docker to Linux engine (Windows only)
+      # Path: .github/workflows/deploy.yml
+      # Thay thế step "Switch Docker to Linux engine (Windows only)" bằng nội dung sau:
+
+      # ================================================================
+      #  Windows: KHÔNG cần switch engine
+      #  Docker trên GitHub-hosted windows-latest = Windows containers
+      #  Giải pháp: chạy ttyd trực tiếp trên host (không dùng container)
+      #  Caddy proxy vào host.docker.internal:7681
+      # ================================================================
+      - name: Install and start ttyd on Windows host
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $dockerCli = "$env:ProgramFiles\Docker\Docker\DockerCli.exe"
-          if (Test-Path $dockerCli) {
-            Write-Host "DockerCli.exe found, switching to Linux engine..."
-            & $dockerCli -SwitchLinuxEngine
-            Write-Host "Waiting for Linux engine to start..."
-            Start-Sleep -Seconds 15
-          } else {
-            Write-Host "DockerCli.exe not found (GitHub-hosted runner) — skipping switch"
+          # ── Download ttyd binary ──────────────────────────────────────
+          $ttydUrl  = "https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.win32.exe"
+          $ttydPath = "$env:TEMP\ttyd.exe"
+
+          Write-Host "Downloading ttyd..."
+          Invoke-WebRequest -Uri $ttydUrl -OutFile $ttydPath -UseBasicParsing
+          Write-Host "✅ ttyd downloaded to $ttydPath"
+
+          # ── Chọn shell tốt nhất có sẵn ────────────────────────────────
+          $shell = $null
+          @("pwsh", "powershell") | ForEach-Object {
+            if (-not $shell -and (Get-Command $_ -ErrorAction SilentlyContinue)) {
+              $shell = $_
+            }
           }
-          docker info
-          $os = (docker info --format '{{.OSType}}' 2>$null)
-          if ($os -eq "linux") {
-            Write-Host "✅ Docker Linux engine ready ($os)"
+          if (-not $shell) { $shell = "cmd" }
+          Write-Host "Using shell: $shell"
+
+          # ── Ghi shell path vào .env để Caddy label dùng ──────────────
+          echo "WEBSSH_SHELL=$shell" >> .env
+
+          # ── Mở firewall cho port 7681 ─────────────────────────────────
+          New-NetFirewallRule `
+            -DisplayName "ttyd-webssh" `
+            -Direction Inbound `
+            -Protocol TCP `
+            -LocalPort 7681 `
+            -Action Allow `
+            -ErrorAction SilentlyContinue | Out-Null
+          Write-Host "✅ Firewall rule added for port 7681"
+
+          # ── Start ttyd như background job ─────────────────────────────
+          # -W  : writable (cho phép input)
+          # -p  : port
+          # -t  : terminal theme
+          # -t fontSize=15
+          # credential: CADDY_AUTH_USER / CADDY_AUTH_HASH không dùng được trực tiếp
+          # → dùng Caddy basic_auth làm lớp bảo vệ, ttyd không cần auth riêng
+          $ttydArgs = @(
+            "-W",
+            "-p", "7681",
+            "-t", "fontSize=15",
+            "-t", "theme={`"background`":`"#1e1e1e`"}",
+            $shell
+          )
+
+          $proc = Start-Process `
+            -FilePath $ttydPath `
+            -ArgumentList $ttydArgs `
+            -WindowStyle Hidden `
+            -PassThru
+
+          Write-Host "✅ ttyd started (PID=$($proc.Id)) on port 7681 with shell=$shell"
+
+          # ── Verify ttyd đang lắng nghe ────────────────────────────────
+          Start-Sleep -Seconds 3
+          $listening = netstat -ano | Select-String ":7681"
+          if ($listening) {
+            Write-Host "✅ Port 7681 is listening"
+            Write-Host $listening
           } else {
-            Write-Host "⚠️ Docker OS type: $os"
-            exit 1
+            Write-Host "⚠️  Port 7681 not detected yet (may still be starting)"
           }
+      # - name: Switch Docker to Linux engine (Windows only)
+      #   if: runner.os == 'Windows'
+      #   shell: pwsh
+      #   run: |
+      #     $dockerCli = "$env:ProgramFiles\Docker\Docker\DockerCli.exe"
+      #     if (Test-Path $dockerCli) {
+      #       Write-Host "DockerCli.exe found, switching to Linux engine..."
+      #       & $dockerCli -SwitchLinuxEngine
+      #       Write-Host "Waiting for Linux engine to start..."
+      #       Start-Sleep -Seconds 15
+      #     } else {
+      #       Write-Host "DockerCli.exe not found (GitHub-hosted runner) — skipping switch"
+      #     }
+      #     docker info
+      #     $os = (docker info --format '{{.OSType}}' 2>$null)
+      #     if ($os -eq "linux") {
+      #       Write-Host "✅ Docker Linux engine ready ($os)"
+      #     } else {
+      #       Write-Host "⚠️ Docker OS type: $os"
+      #       exit 1
+      #     }
       # - name: Switch Docker to Linux engine (Windows only)
       #   if: runner.os == 'Windows'
       #   shell: pwsh

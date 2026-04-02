@@ -166,17 +166,39 @@ services:
   #  Sau khi switch Linux engine, DOCKER_SOCK hoạt động bình thường
   #  Dùng để debug: docker logs, compose, exec khi có lỗi
   # ================================================================
+  # webssh-windows:
+  #   profiles: ["windows-only"]
+  #   build: ./services/webssh-docker
+  #   command: ["ttyd", "-W", "bash"]
+  #   environment:
+  #     COMPOSE_PROJECT_NAME: "${COMPOSE_PROJECT_NAME:-myapp}"
+  #     COMPOSE_FILE: /workspace/docker-compose.yml
+  #   volumes:
+  #     - ${DOCKER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock
+  #     - .:/workspace
+  #   working_dir: /workspace
+  #   labels:
+  #     - "caddy=http://${SUBDOMAIN_WEBSSH:-ttyd-my-docker-app}.${DOMAIN}"
+  #     - "caddy.reverse_proxy={{upstreams 7681}}"
+  #     - "caddy.basic_auth=/*"
+  #     - "caddy.basic_auth.${CADDY_AUTH_USER}=${CADDY_AUTH_HASH}"
+  #   networks: [app_net]
+  #   restart: unless-stopped
+  # ================================================================
+  #  WEBSSH — Windows: proxy sang ttyd chạy trực tiếp trên host
+  #  ttyd được start bởi GitHub Actions step "Install and start ttyd"
+  #  Container này chỉ là TCP bridge: container:7681 → host:7681
+  # ================================================================
   webssh-windows:
     profiles: ["windows-only"]
-    build: ./services/webssh-docker
-    command: ["ttyd", "-W", "bash"]
-    environment:
-      COMPOSE_PROJECT_NAME: "${COMPOSE_PROJECT_NAME:-myapp}"
-      COMPOSE_FILE: /workspace/docker-compose.yml
-    volumes:
-      - ${DOCKER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock
-      - .:/workspace
-    working_dir: /workspace
+    image: alpine/socat:latest
+    # forward mọi kết nối TCP vào port 7681 của container
+    # sang host.docker.internal:7681 (nơi ttyd đang lắng nghe)
+    command: >
+      TCP-LISTEN:7681,fork,reuseaddr
+      TCP:host.docker.internal:7681
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     labels:
       - "caddy=http://${SUBDOMAIN_WEBSSH:-ttyd-my-docker-app}.${DOMAIN}"
       - "caddy.reverse_proxy={{upstreams 7681}}"
