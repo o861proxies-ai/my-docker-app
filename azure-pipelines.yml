@@ -1,7 +1,8 @@
 # Path: azure-pipelines.yml
-# Bám sát logic của .github/workflows/deploy.yml (ưu tiên Linux runner).
+# Bám sát logic của .github/workflows/deploy.yml.
 # - Chỉ chạy thủ công.
-# - Tái sử dụng cùng script deploy/artifacts để giữ hành vi đồng nhất.
+# - OS detection dùng uname (detect-os.sh), không phụ thuộc biến của runner.
+# - Mỗi step có condition tương đương if: runner.os == '...' trong GitHub Actions.
 
 trigger: none
 pr: none
@@ -15,50 +16,80 @@ pool:
 #   RTDB_URL: $(RTDB_URL)
 
 steps:
+  # ──────────────────────────────────────────────────────────────────────
   - checkout: self
     displayName: Checkout
 
-  # STEP 1 — Pull .env & credentials từ RTDB
+  # ══════════════════════════════════════════════════════════════════════
+  #  STEP 1 — Pull .env & credentials từ RTDB
+  #  Chạy TRƯỚC detect-OS để không bị ghi đè
+  # ══════════════════════════════════════════════════════════════════════
   - bash: bash .github/scripts/pull-env.sh
     displayName: Pull .env & credentials from RTDB
     env:
       RTDB_URL: $(RTDB_URL)
 
-  # STEP 2 — Detect OS, append biến vào .env + export cho các step sau
-  - bash: |
-      set -euo pipefail
-      export RUNNER_OS="Linux"
-      export GITHUB_WORKSPACE="$(Build.SourcesDirectory)"
-      export GITHUB_ENV="$(Pipeline.Workspace)/github_env"
-
-      bash .github/scripts/detect-os.sh
-
-      # Map các biến detect được từ "GITHUB_ENV" sang Azure variables
-      while IFS='=' read -r key value; do
-        [ -n "$key" ] || continue
-        echo "##vso[task.setvariable variable=${key}]${value}"
-      done < "$GITHUB_ENV"
+  # ══════════════════════════════════════════════════════════════════════
+  #  STEP 2 — Detect OS environment
+  #  detect-os.sh dùng uname, tự nhận TF_BUILD và emit ##vso[] variables
+  #  → CUR_OS, DOCKER_SOCK, COMPOSE_PROFILES, COMPOSE_PROJECT_NAME, WSL_WORKSPACE
+  # ══════════════════════════════════════════════════════════════════════
+  - bash: bash .github/scripts/detect-os.sh
     displayName: Detect OS environment
 
-  # STEP 3 — Setup môi trường theo OS (Azure pipeline này dùng Linux)
+  # ══════════════════════════════════════════════════════════════════════
+  #  STEP 3 — Setup môi trường theo OS
+  # ══════════════════════════════════════════════════════════════════════
   - bash: bash .github/scripts/setup-linux.sh
     displayName: Setup environment (Linux)
+    condition: and(succeeded(), eq(variables['CUR_OS'], 'linux'))
 
-  # STEP 4 — Build & start Docker Compose stack
+  - pwsh: .github/scripts/setup-windows.ps1
+    displayName: Setup environment (Windows)
+    condition: and(succeeded(), eq(variables['CUR_OS'], 'windows'))
+
+  # ══════════════════════════════════════════════════════════════════════
+  #  STEP 4 — Build & start Docker Compose stack
+  # ══════════════════════════════════════════════════════════════════════
   - bash: docker compose up -d --build --remove-orphans
     displayName: Build & start services (Linux)
+    condition: and(succeeded(), eq(variables['CUR_OS'], 'linux'))
 
-  # STEP 5 — Cleanup + keepalive
+  - pwsh: |
+      $wsl = $env:WSL_WORKSPACE
+      wsl -d Ubuntu -- bash -c "cd '$wsl' && sudo docker compose up -d --build --remove-orphans"
+    displayName: Build & start services (Windows/WSL2)
+    condition: and(succeeded(), eq(variables['CUR_OS'], 'windows'))
+
+  # ══════════════════════════════════════════════════════════════════════
+  #  STEP 5 — Cleanup + keepalive
+  # ══════════════════════════════════════════════════════════════════════
   - bash: docker image prune -f
     displayName: Clean up unused images (Linux)
+    condition: and(succeeded(), eq(variables['CUR_OS'], 'linux'))
+
+  - pwsh: |
+      $wsl = $env:WSL_WORKSPACE
+      wsl -d Ubuntu -- bash -c "cd '$wsl' && sudo docker image prune -f"
+    displayName: Clean up unused images (Windows/WSL2)
+    condition: and(succeeded(), eq(variables['CUR_OS'], 'windows'))
 
   - bash: dotenvrtdb runner keepalive
     displayName: dotenvrtdb runner keepalive
 
-  # STEP 6 — Collect artifacts (always)
+  # ══════════════════════════════════════════════════════════════════════
+  #  STEP 6 — Collect artifacts (always)
+  # ══════════════════════════════════════════════════════════════════════
   - bash: bash .github/scripts/collect-artifacts.sh
     displayName: Collect docker runtime artifacts (Linux)
-    condition: always()
+    condition: and(always(), eq(variables['CUR_OS'], 'linux'))
+
+  - pwsh: |
+      $wsl = $env:WSL_WORKSPACE
+      if (-not $wsl) { Write-Host "WSL_WORKSPACE not set, skipping"; exit 0 }
+      wsl -d Ubuntu -- bash -c "cd '$wsl' && bash .github/scripts/collect-artifacts.sh"
+    displayName: Collect docker runtime artifacts (Windows/WSL2)
+    condition: and(always(), eq(variables['CUR_OS'], 'windows'))
 
   - task: PublishBuildArtifacts@1
     displayName: Publish docker runtime artifacts
